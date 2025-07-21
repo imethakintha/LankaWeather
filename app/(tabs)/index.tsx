@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, SafeAreaView, TouchableOpacity, Keyboard, ActivityIndicator, Alert, FlatList } from 'react-native';
 import axios from 'axios';
 import * as Location from 'expo-location';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, Keyboard, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { OPENWEATHER_API_KEY } from '@env';
 
-
-const API_KEY = '2e221da48bd09743f58871e71ff38f25'; 
+const API_KEY = OPENWEATHER_API_KEY; 
 const WEATHER_API_URL = 'https://api.openweathermap.org/data/2.5/weather';
 const FORECAST_API_URL = 'https://api.openweathermap.org/data/2.5/forecast';
 
@@ -30,44 +30,69 @@ const getWeatherIcon = (iconCode: string) => {
   return icons[iconCode] || '❓';
 };
 
+const getBackgroundColor = (weatherMain: string) => {
+  const colors: { [key: string]: string[] } = {
+    'Clear': ['#47a3ff', '#2d87e6'],
+    'Clouds': ['#7c8ca3', '#5b6b82'],
+    'Rain': ['#5d6d7e', '#4a5766'],
+    'Drizzle': ['#a9b1b9', '#8d969e'],
+    'Thunderstorm': ['#3b3b3b', '#2a2a2a'],
+    'Snow': ['#d3d3d3', '#b0b0b0'],
+    'Mist': ['#a9b1b9', '#8d969e'],
+  };
+
+  return colors[weatherMain] || ['#47a3ff', '#2d87e6']; 
+};
+
 export default function WeatherApp() {
   const [inputCity, setInputCity] = useState('');
+  const [currentCity, setCurrentCity] = useState('');
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
   const [forecastData, setForecastData] = useState<ForecastItem[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchData = async (params: { q?: string; lat?: number; lon?: number }) => {
-    setLoading(true);
+    if (!refreshing) setLoading(true);
     setError(null);
     try {
       const weatherResponse = await axios.get(WEATHER_API_URL, { params: { ...params, appid: API_KEY, units: 'metric' } });
       const forecastResponse = await axios.get(FORECAST_API_URL, { params: { ...params, appid: API_KEY, units: 'metric' } });
       
       setWeatherData(weatherResponse.data);
+      setCurrentCity(weatherResponse.data.name);
       const dailyForecasts = forecastResponse.data.list.filter((item: ForecastItem) => item.dt_txt.includes("12:00:00"));
       setForecastData(dailyForecasts);
 
     } catch (e) {
-      setError(`Could not find weather data. Please check the city name or your network connection.`);
+      setError(`Could not find weather data. Please try another city.`);
       setWeatherData(null);
       setForecastData(null);
     }
     setLoading(false);
+    setRefreshing(false);
   };
 
-  useEffect(() => {
-    (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setError('Permission to access location was denied. Showing weather for Colombo.');
-        fetchData({ q: 'Colombo' }); 
-        return;
-      }
-      let location = await Location.getCurrentPositionAsync({});
-      fetchData({ lat: location.coords.latitude, lon: location.coords.longitude });
-    })();
+  const loadInitialWeather = useCallback(async () => {
+    let { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      setError('Permission denied. Showing weather for Colombo.');
+      fetchData({ q: 'Colombo' });
+      return;
+    }
+    let location = await Location.getCurrentPositionAsync({});
+    fetchData({ lat: location.coords.latitude, lon: location.coords.longitude });
   }, []);
+
+  useEffect(() => {
+    loadInitialWeather();
+  }, [loadInitialWeather]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadInitialWeather();
+  }, [loadInitialWeather]);
 
   const handleSearch = () => {
     if (inputCity.trim()) {
@@ -78,11 +103,14 @@ export default function WeatherApp() {
   };
 
   const renderContent = () => {
-    if (loading) return <ActivityIndicator size="large" color="#007bff" style={styles.centered} />;
+    if (loading) return <ActivityIndicator size="large" color="#fff" style={styles.centered} />;
     if (error && !weatherData) return <Text style={[styles.centered, styles.errorText]}>{error}</Text>;
     if (weatherData) {
       return (
-        <View style={styles.weatherContainer}>
+        <ScrollView 
+          contentContainerStyle={styles.weatherContainer}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />}
+        >
           {error && <Text style={styles.errorText}>{error}</Text>}
           <Text style={styles.cityName}>{weatherData.name}</Text>
           <Text style={styles.weatherIcon}>{getWeatherIcon(weatherData.weather[0].icon)}</Text>
@@ -98,6 +126,7 @@ export default function WeatherApp() {
             <FlatList
               data={forecastData}
               horizontal
+              showsHorizontalScrollIndicator={false}
               keyExtractor={(item) => item.dt_txt}
               renderItem={({ item }) => (
                 <View style={styles.forecastItem}>
@@ -108,18 +137,21 @@ export default function WeatherApp() {
               )}
             />
           </View>
-        </View>
+        </ScrollView>
       );
     }
     return null;
   };
 
+  const [bgColorStart, bgColorEnd] = getBackgroundColor(weatherData?.weather[0].main || 'Clear');
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: bgColorStart }]}>
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.input}
           placeholder="Search for a city..."
+          placeholderTextColor="#999"
           value={inputCity}
           onChangeText={setInputCity}
           onSubmitEditing={handleSearch}
@@ -136,21 +168,22 @@ export default function WeatherApp() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#eaf5ff',
   },
   searchContainer: {
     flexDirection: 'row',
     padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.3)',
   },
   input: {
     flex: 1,
     height: 50,
-    borderColor: '#ccc',
-    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.9)',
     borderRadius: 8,
     paddingHorizontal: 16,
     fontSize: 16,
+    color: '#000',
   },
   button: {
     marginLeft: 10,
@@ -173,20 +206,26 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   errorText: {
-    color: 'red',
+    color: '#fff',
+    backgroundColor: 'rgba(255,0,0,0.5)',
+    padding: 10,
+    borderRadius: 5,
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 10,
   },
   weatherContainer: {
-    flex: 1,
+    flexGrow: 1,
     alignItems: 'center',
     paddingTop: 20,
   },
   cityName: {
     fontSize: 36,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#fff',
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowOffset: {width: -1, height: 1},
+    textShadowRadius: 10
   },
   weatherIcon: {
     fontSize: 80,
@@ -195,12 +234,13 @@ const styles = StyleSheet.create({
   temperature: {
     fontSize: 56,
     fontWeight: '200',
-    color: '#333',
+    color: '#fff',
   },
   description: {
     fontSize: 22,
     textTransform: 'capitalize',
-    color: '#555',
+    color: '#fff',
+    fontWeight: '600',
   },
   detailsContainer: {
     marginTop: 20,
@@ -210,24 +250,23 @@ const styles = StyleSheet.create({
   },
   detailText: {
     fontSize: 16,
-    color: '#555',
+    color: '#fff',
   },
   forecastContainer: {
-    marginTop: 'auto',
+    marginTop: 30,
     width: '100%',
     paddingVertical: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#ddd',
   },
   forecastTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 10,
+    color: '#fff',
   },
   forecastItem: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
     borderRadius: 10,
     padding: 10,
     marginHorizontal: 8,
@@ -236,6 +275,7 @@ const styles = StyleSheet.create({
   forecastDay: {
     fontSize: 14,
     fontWeight: 'bold',
+    color: '#fff',
   },
   forecastIcon: {
     fontSize: 30,
@@ -243,5 +283,6 @@ const styles = StyleSheet.create({
   },
   forecastTemp: {
     fontSize: 16,
+    color: '#fff',
   },
 });
