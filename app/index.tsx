@@ -1,8 +1,9 @@
+import { OPENWEATHER_API_KEY } from '@env';
 import axios from 'axios';
 import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Keyboard, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { OPENWEATHER_API_KEY } from '@env';
+
 
 const API_KEY = OPENWEATHER_API_KEY; 
 const WEATHER_API_URL = 'https://api.openweathermap.org/data/2.5/weather';
@@ -40,13 +41,11 @@ const getBackgroundColor = (weatherMain: string) => {
     'Snow': ['#d3d3d3', '#b0b0b0'],
     'Mist': ['#a9b1b9', '#8d969e'],
   };
-
-  return colors[weatherMain] || ['#47a3ff', '#2d87e6']; 
+  return colors[weatherMain] || ['#47a3ff', '#2d87e6'];
 };
 
 export default function WeatherApp() {
   const [inputCity, setInputCity] = useState('');
-  const [currentCity, setCurrentCity] = useState('');
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
   const [forecastData, setForecastData] = useState<ForecastItem[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,6 +53,11 @@ export default function WeatherApp() {
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchData = async (params: { q?: string; lat?: number; lon?: number }) => {
+    if (!API_KEY) {
+      setError("API Key is missing. Please check your .env file and restart the app.");
+      setLoading(false);
+      return;
+    }
     if (!refreshing) setLoading(true);
     setError(null);
     try {
@@ -61,7 +65,6 @@ export default function WeatherApp() {
       const forecastResponse = await axios.get(FORECAST_API_URL, { params: { ...params, appid: API_KEY, units: 'metric' } });
       
       setWeatherData(weatherResponse.data);
-      setCurrentCity(weatherResponse.data.name);
       const dailyForecasts = forecastResponse.data.list.filter((item: ForecastItem) => item.dt_txt.includes("12:00:00"));
       setForecastData(dailyForecasts);
 
